@@ -5,6 +5,12 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/bdubs00/constellation/internal/audit"
+	"github.com/bdubs00/constellation/internal/config"
+	"github.com/bdubs00/constellation/internal/policy"
+	"github.com/bdubs00/constellation/internal/proxy"
+	"github.com/bdubs00/constellation/internal/secrets"
 )
 
 var (
@@ -55,11 +61,67 @@ func main() {
 }
 
 func runProxy(cmd *cobra.Command, args []string) error {
-	fmt.Println("proxy not yet implemented")
-	return nil
+	serverName, _ := cmd.Flags().GetString("server")
+
+	cfg, err := config.Load(policyPath)
+	if err != nil {
+		return fmt.Errorf("loading policy: %w", err)
+	}
+
+	srv, ok := cfg.Servers[serverName]
+	if !ok {
+		return fmt.Errorf("server %q not found in policy file", serverName)
+	}
+
+	// Set up audit logger
+	var auditWriter *os.File
+	if auditLog != "" {
+		f, err := os.OpenFile(auditLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("opening audit log: %w", err)
+		}
+		defer f.Close()
+		auditWriter = f
+	} else {
+		auditWriter = os.Stderr
+	}
+	logger := audit.New(auditWriter)
+
+	// Resolve secrets
+	extraEnv := map[string]string{}
+	if srv.Secrets != nil && len(srv.Secrets.Env) > 0 {
+		providers := map[string]secrets.Provider{
+			"env": secrets.NewStaticProvider(),
+		}
+
+		// Set up Vault provider if configured
+		if cfg.Vault != nil {
+			vaultProvider, err := secrets.NewVaultProvider(*cfg.Vault)
+			if err != nil {
+				return fmt.Errorf("initializing vault: %w", err)
+			}
+			cancel := vaultProvider.StartRenewal()
+			defer cancel()
+			providers["vault"] = vaultProvider
+		}
+
+		resolved, err := secrets.Resolve(srv.Secrets.Env, providers)
+		if err != nil {
+			return fmt.Errorf("resolving secrets: %w", err)
+		}
+		extraEnv = resolved
+	}
+
+	engine := policy.NewEngine(srv)
+
+	return proxy.Run(serverName, srv, engine, logger, dryRun, extraEnv)
 }
 
 func validatePolicy(cmd *cobra.Command, args []string) error {
-	fmt.Println("validate not yet implemented")
+	_, err := config.Load(policyPath)
+	if err != nil {
+		return err
+	}
+	fmt.Println("policy file is valid")
 	return nil
 }

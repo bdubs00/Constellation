@@ -1,0 +1,51 @@
+version: "1"
+
+# Optional: Vault configuration for secret injection
+# vault:
+#   address: "https://vault.example.com:8200"
+#   tls:
+#     ca_cert: "/path/to/ca.pem"
+#     skip_verify: false
+#   auth:
+#     method: token
+#     # For AppRole:
+#     # method: approle
+#     # role_id_path: "/path/to/role-id"
+#     # secret_id_path: "/path/to/secret-id"
+
+servers:
+  # Example: filesystem MCP server with restricted access
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+
+    # Secrets injected as environment variables to the server process
+    # secrets:
+    #   env:
+    #     DATABASE_URL: "vault:secret/data/myapp#connection_string"
+    #     API_KEY: "env:MY_API_KEY"
+
+    default: deny
+
+    rules:
+      # Allow reading files under /public/
+      - tool: read_file
+        allow: true
+        when:
+          path: "/public/**"
+
+      # Allow reading shared docs
+      - tool: read_file
+        allow: true
+        when:
+          path: "/shared/docs/**"
+
+      # Allow writing only to /tmp/
+      - tool: write_file
+        allow: true
+        when:
+          path: "/tmp/**"
+
+      # Allow listing any directory
+      - tool: list_directory
+        allow: true
